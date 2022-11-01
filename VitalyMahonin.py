@@ -4,8 +4,8 @@ from dataclasses import dataclass
 import math
 import random
 import argparse
-import mido
 from typing import Callable, Iterator, Union
+import mido
 
 
 ## Helpers
@@ -200,6 +200,9 @@ class AccompanimentFitnessChecker:
                     score += 10
             elif self.key_notes[i] is None:
                 score += 10
+            # TODO: add circle of fifths or chord progression or the thing described before chord progression
+            # TODO: not always skip chord if no simultaneous melody note, try to search another notes in this section and play with it (maybe except full break), also maybe the todo above may help to find candidates
+            # TODO: increase score for a chord that have consonans with other melody notes in his section (so it's a possible implementation for the todo above if the cosonans score can overdo the disable score)
         return score
 
 
@@ -354,15 +357,15 @@ if __name__ == "__main__":
     parser.add_argument(
         "--out",
         type=str,
-        help='the output file name, default to "accompaniment"',
-        default="accompaniment",
-        metavar="filename",  # TODO
+        help='the output file name, default to "output"',
+        default="output",
+        metavar="filename",
     )
 
     parser.add_argument(
         "-k",
         help="add detected key to the output file name (like filename-C#m.mid)",
-        action="store_true",  # TODO
+        action="store_true",
     )
 
     args = parser.parse_args()
@@ -390,17 +393,12 @@ if __name__ == "__main__":
     )
 
     population = generate_random_population(100, len(key_notes))
-    for _ in range(1000):
+    for _ in range(1000):  # 1000 generations
         selected = select(population, fitness_checker.fitness)
         population = deepcopy(selected)
         while len(population) < random.randint(90, 100):
-            population.add(
-                mutate(
-                    cross(
-                        tuple(random.choice(tuple(selected)) for _ in range(2)),
-                    ),
-                ),
-            )
+            parents = tuple(random.choice(tuple(selected)) for _ in range(2))
+            population.add(mutate(cross(parents)))
     best = sorted(population, key=fitness_checker.fitness, reverse=True)[0]
 
     # write result (as a new track)
@@ -432,4 +430,4 @@ if __name__ == "__main__":
                 )
             start = 0
     args.input.tracks.append(track)
-    args.input.save(f"{args.out}.mid")
+    args.input.save(f"{args.out}{'-'+str(key) if args.k else ''}.mid")
