@@ -1,5 +1,5 @@
 #!/bin/python3
-from copy import deepcopy
+from copy import copy
 from dataclasses import dataclass
 import math
 import random
@@ -8,8 +8,6 @@ import signal
 import sys
 from typing import Callable, Iterator, Union
 import mido
-
-# TODO: output3 is broken
 
 try:
     from tqdm import tqdm
@@ -32,7 +30,9 @@ class Key:
     name: str
     tonic: int
     notes: frozenset[int]
-    steps: tuple[int]  # steps[note] = step_index or None if the note is not in Key
+    steps: tuple[
+        int
+    ]  # steps[note] = step_index or None if the note is not in Key (step_index starting from 0, not from 1 as in usual music theory)
 
     def __init__(self, name: str, tonic: int, scale: tuple[int]):
         """Create a key from a tonic and a scale.
@@ -51,7 +51,7 @@ class Key:
 
         tmp = [None] * 12
         for i, e in enumerate(scale):
-            tmp[(e + tonic) % 12] = i + 1
+            tmp[(e + tonic) % 12] = i
         self.steps = tuple(tmp)
 
     def __str__(self) -> str:
@@ -110,21 +110,21 @@ def detect_key(notes: Iterator[int]) -> Key:
     )
 
 
-def detect_octave(notes: Iterator[int]) -> int:
+def detect_octave(notes: Iterator[int]) -> Union[int, None]:
     """Detects the average octave of the notes
 
     Args:
         notes (Iterator[int]): List of used notes (midi numbers)
 
     Returns:
-        int: the octave of the notes
+        Union[int, None]: the octave of the notes or None if the notes list in empty
     """
     s = 0
     n = 0
     for note in notes:
         s += note // 12
         n += 1
-    return s // n
+    return s // n if n != 0 else None
 
 
 MINOR_CHORD = (0, 3, 7)
@@ -161,7 +161,7 @@ class Chord:
 
 
 ## Genetic stuff
-# instances are tuple[Chord]
+# instances are tuple[Union[Chord, None]], where None means no chord occupying the section
 
 
 def random_chord() -> Union[Chord, None]:
@@ -188,44 +188,56 @@ class AccompanimentFitnessChecker:
     melody_key: Key
     key_notes: tuple[int]  # may contain None's
     section_notes: tuple[set[int]]
-    melody_octave: int
-    pause_rate: float
+    octaves: tuple[Union[int, None]]
 
     def __init__(
         self,
         melody_key: Key,
         key_notes: tuple[int],
         section_notes: tuple[set[int]],
-        melody_octave: int,
-        pause_rate: float,
     ):
         """Creates the accompaniment fitness checker for a concrete melody
 
         Args:
             melody_key (Key): the key of the melody
             key_notes (tuple[int]): notes by each section (midi, lost octave) that need to be consonant with the accompaniment
-            section_notes (tuple[set[int]]): all the notes in the section (midi number, lost octave)
-            melody_octave (int): midi octave of the melody
-            pause_rate (float): whether you want more pause sensitivity
+            section_notes (tuple[set[int]]): all the notes in the section (midi number, octave present)
         """
         assert all(note is None or 0 <= note < 12 for note in key_notes)
         self.melody_key = melody_key
         self.key_notes = key_notes
-        self.section_notes = section_notes
-        self.pause_rate = pause_rate
-        self.melody_octave = melody_octave
+        self.section_notes = tuple(
+            frozenset(note % 12 for note in notes) for notes in section_notes
+        )
+        self.octaves = tuple(detect_octave(notes) for notes in section_notes)
 
-    def fitness(self, accompaniment: tuple[Chord]) -> float:
+    def fitness(self, accompaniment: tuple[Union[Chord, None]]) -> float:
         assert len(accompaniment) == len(self.key_notes)
 
-        octave = None
+        # GOOD_ACCESSORS[key.step_index(chord_root_note)] = set of good key indices for the next chords
+        GOOD_ACCESSORS = (
+            {0, 3, 4, 5},  # 0
+            {1, 4},  # 1
+            set(),  # 2
+            {0, 3, 4},  # 3
+            {0, 3, 4, 5},  # 4
+            {1, 3, 5},  # 5
+            set(),  # 6
+        )
+
+        prev_octave = None
+        prev_key_step_index = None
         score = 0
 
         for i, chord in enumerate(accompaniment):
-            if chord is None and self.key_notes[i] is None:
-                score += self.pause_rate
-            elif chord is not None:
-                if chord.notes < self.melody_key.notes:
+            if chord is None:
+                prev_key_step_index = None
+                if self.key_notes[i] is None:
+                    score += 30
+                    if self.octaves[i] is None:
+                        score += 30
+            else:
+                if chord.root_note in self.melody_key.notes:
                     score += 1
 
                     # appropriate root_note rewards for major, minor and dim chords
@@ -260,22 +272,39 @@ class AccompanimentFitnessChecker:
                     ):
                         score += 1
 
+                    # check chord progression (self.melody_key.steps[chord.root_note] is guaranteed to be not None here because root_note in melody_key.notes)
+                    if prev_key_step_index is not None and (
+                        self.melody_key.steps[chord.root_note]
+                        in GOOD_ACCESSORS[prev_key_step_index]
+                    ):
+                        score += 2
+
+                # note that for a chord that does not match the key with it's root self.melody_key.steps[chord.root_note] would return None
+                prev_key_step_index = self.melody_key.steps[chord.root_note]
+
+                # reward for key match
+                score += 4 * len(self.melody_key.notes & chord.notes)
+
                 # reward for more accompaniment chords are in the same octave
-                if octave is None:
-                    octave = chord.octave
-                if octave == chord.octave:
-                    score += 2
+                score += (
+                    (20 if prev_octave == chord.octave else 0)
+                    if prev_octave is not None
+                    else 0
+                )
+                prev_octave = chord.octave
 
                 # reward for chord hitting the major note of the melody on it's section
-                if chord.root_note == self.key_notes[i]:
-                    score += 10
+                if self.key_notes[i] in chord.notes:
+                    score += 5
+                    if self.key_notes[i] == chord.root_note:
+                        score += 5
 
                 # reward for more consonant sounds of chord with the melody
                 score += 3 * len(self.section_notes[i] & chord.notes)
 
-        # target octave
-        if octave == self.melody_octave - 1:
-            score += 20
+                # target octave
+                if self.octaves[i] is not None and chord.octave == self.octaves[i] - 1:
+                    score += 15
 
         return score
 
@@ -283,15 +312,15 @@ class AccompanimentFitnessChecker:
 def generate_random_population(
     population_size: int,
     instance_len: int,
-) -> set[tuple[Chord]]:
+) -> set[tuple[Union[Chord, None]]]:
     """Returns a random population of accompaniments
 
     Args:
         population_size (int): size of the resulting set
-        instance_len (int): length of each instance of the population
+        instance_len (int): length of each instance of the population (number of chords in a accompaniment)
 
     Returns:
-        set[tuple[Chord]]: the resulting set
+        set[tuple[Union[Chord, None]]]: the resulting set
     """
     res = set()
     for _ in range(population_size):
@@ -302,29 +331,29 @@ def generate_random_population(
 
 
 def select(
-    population: set[tuple[Chord]],
-    fitness: Callable[[tuple[Chord]], int],
-) -> set[tuple[Chord]]:
+    population: set[tuple[Union[Chord, None]]],
+    fitness: Callable[[tuple[Union[Chord, None]]], int],
+) -> set[tuple[Union[Chord, None]]]:
     """Selects 50% of the best instances from the population according to the fitness function
 
     Args:
-        population (set[tuple[Chord]]): parent population
-        fitness (Callable[[tuple[Chord]], int]): fitness function ( higher is better )
+        population (set[tuple[Union[Chord, None]]]): parent population
+        fitness (Callable[[tuple[Union[Chord, None]]], int]): fitness function ( higher is better )
 
     Returns:
-        set[tuple[Chord]]: the set of selected instances
+        set[tuple[Union[Chord, None]]]: the set of selected instances
     """
     return set(sorted(population, key=fitness, reverse=True)[: len(population) // 2])
 
 
-def cross(parents: tuple[tuple[Chord]]) -> tuple[Chord]:
+def cross(parents: tuple[tuple[Union[Chord, None]]]) -> tuple[Union[Chord, None]]:
     """Create a new instance crossing parents
 
     Args:
-        parents (set[tuple[Chord]]): the parents
+        parents (set[tuple[Union[Chord, None]]]): the parents
 
     Returns:
-        tuple[Chord]: crossed instance
+        tuple[Union[Chord, None]]: crossed instance
     """
     assert len(parents) > 1
     instance_len = len(parents[0])
@@ -333,15 +362,15 @@ def cross(parents: tuple[tuple[Chord]]) -> tuple[Chord]:
 
 
 def mutate(
-    instance: tuple[Chord],
-) -> tuple[Chord]:
+    instance: tuple[Union[Chord, None]],
+) -> tuple[Union[Chord, None]]:
     """Returns similar instance, but 10% of it's chords are modified
 
     Args:
-        instance (tuple[Chord]): source instance
+        instance (tuple[Union[Chord, None]]): source instance
 
     Returns:
-        tuple[Chord]: mutated instance
+        tuple[Union[Chord, None]]: mutated instance
     """
     return tuple(
         random_chord() if random.randint(0, 10) == 0 else chord for chord in instance
@@ -379,7 +408,7 @@ def compute_key_notes(
     Returns:
         list[tuple[int], tuple[int]]:
             [0] a tuple of key notes (midi number, lost octave)
-            [1] a tuple of all notes in the section (midi number, lost octave)
+            [1] a tuple of all notes in the section (midi number, octave present)
     """
     key_notes_list = [None] * (math.ceil(track_longing(track) / chord_duration))
     all_notes_list = [set() for _ in range(len(key_notes_list))]
@@ -389,7 +418,7 @@ def compute_key_notes(
         if msg.type == "note_on":
             if ticks % chord_duration == 0:
                 key_notes_list[ticks // chord_duration] = msg.note % 12
-            all_notes_list[ticks // chord_duration].add(msg.note % 12)
+            all_notes_list[ticks // chord_duration].add(msg.note)
     return tuple(key_notes_list), tuple(all_notes_list)
 
 
@@ -453,14 +482,6 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--pr",
-        type=float,
-        help="pause rate, whether you want more pause sensitivity, default to 10",  # actually number of generations
-        default=10,
-        metavar="float",
-    )
-
-    parser.add_argument(
         "-k",
         help="add detected key to the output file name (like filename-C#m.mid)",
         action="store_true",
@@ -476,23 +497,20 @@ if __name__ == "__main__":
     )
 
     # define chord duration and divide track into equal parts of chord durations
-    chord_duration = args.input.ticks_per_beat * 2
+    chord_duration = args.input.ticks_per_beat
     key_notes, section_notes = compute_key_notes(
-        list(filter_notes(args.input)),
-        chord_duration,
+        list(filter_notes(args.input)), chord_duration
     )
 
-    # run genetic to find a good accompaniment
+    # prepare things for evolution
     key = detect_key(melody_notes)
-    fitness_checker = AccompanimentFitnessChecker(
-        key, key_notes, section_notes, detect_octave(melody_notes), args.pr
-    )
-
+    fitness_checker = AccompanimentFitnessChecker(key, key_notes, section_notes)
     population = generate_random_population(100, len(key_notes))
 
+    # prepare to write the best fit (and be able to write it even in the middle of the process when user presses ctrl+c)
     def write():
         best = sorted(population, key=fitness_checker.fitness, reverse=True)[0]
-        velocity = int(get_average_velocity(args.input) * 0.9)
+        velocity = int(get_average_velocity(args.input) * 0.7)
 
         track = mido.MidiTrack()
         track.append(mido.MetaMessage("track_name", name="Accompaniment", time=0))
@@ -500,7 +518,7 @@ if __name__ == "__main__":
 
         for chord in best:
             if chord is None:
-                start = chord_duration
+                start += chord_duration
             else:
                 for i, note in enumerate(chord.notes):
                     track.append(
@@ -525,19 +543,20 @@ if __name__ == "__main__":
         args.input.tracks.append(track)
         args.input.save(f"{args.out}{'-'+key.name if args.k else ''}.mid")
 
-    def signal_handler(sig, frame):
+    def sigint_handler(*_):
         # write so far best found solution even not all iterations are done
         write()
         sys.exit(0)
 
-    signal.signal(signal.SIGINT, signal_handler)  # handle ctrl+c
+    signal.signal(signal.SIGINT, sigint_handler)  # handle ctrl+c
 
+    # run evolution on population (with iters number of generations)
     for _ in progress(
         range(args.iters),
         desc="Progress",
     ):
         selected = select(population, fitness_checker.fitness)
-        population = deepcopy(selected)
+        population = copy(selected)
         while len(population) < random.randint(90, 100):
             parents = tuple(random.choice(tuple(selected)) for _ in range(2))
             population.add(mutate(cross(parents)))
