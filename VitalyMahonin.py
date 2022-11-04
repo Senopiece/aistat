@@ -189,12 +189,14 @@ class AccompanimentFitnessChecker:
     key_notes: tuple[int]  # may contain None's
     section_notes: tuple[set[int]]
     octaves: tuple[Union[int, None]]
+    pause_sensitivity: float
 
     def __init__(
         self,
         melody_key: Key,
         key_notes: tuple[int],
         section_notes: tuple[set[int]],
+        pause_sensitivity: float,
     ):
         """Creates the accompaniment fitness checker for a concrete melody
 
@@ -202,6 +204,7 @@ class AccompanimentFitnessChecker:
             melody_key (Key): the key of the melody
             key_notes (tuple[int]): notes by each section (midi, lost octave) that need to be consonant with the accompaniment
             section_notes (tuple[set[int]]): all the notes in the section (midi number, octave present)
+            pause_sensitivity (float): pause sensitivity
         """
         assert all(note is None or 0 <= note < 12 for note in key_notes)
         self.melody_key = melody_key
@@ -210,6 +213,7 @@ class AccompanimentFitnessChecker:
             frozenset(note % 12 for note in notes) for notes in section_notes
         )
         self.octaves = tuple(detect_octave(notes) for notes in section_notes)
+        self.pause_sensitivity = pause_sensitivity
 
     def fitness(self, accompaniment: tuple[Union[Chord, None]]) -> float:
         assert len(accompaniment) == len(self.key_notes)
@@ -227,16 +231,20 @@ class AccompanimentFitnessChecker:
 
         prev_octave = None
         prev_key_step_index = None
+        octave_s = 0
         score = 0
 
         for i, chord in enumerate(accompaniment):
             if chord is None:
                 prev_key_step_index = None
                 if self.key_notes[i] is None:
-                    score += 30
+                    score += self.pause_sensitivity
                     if self.octaves[i] is None:
-                        score += 30
+                        score += self.pause_sensitivity
             else:
+                octave_s += chord.octave
+                average_octave = octave_s / (i + 1)
+
                 if chord.root_note in self.melody_key.notes:
                     score += 1
 
@@ -248,13 +256,13 @@ class AccompanimentFitnessChecker:
                         MAJOR_CHORD,
                         MINOR_CHORD,
                     }:
-                        score += 1
+                        score += 10
                     elif (
                         self.melody_key.steps[chord.root_note]
                         in forbidden  # witch was forbidden for major and minor is good for dim
                         and chord.chord_type == DIM_CHORD
                     ):
-                        score += 1
+                        score += 10
 
                     # appropriate root_note rewards for sus2 chord
                     forbidden = {2, 5} if self.melody_key.name.endswith("m") else {3, 7}
@@ -262,7 +270,7 @@ class AccompanimentFitnessChecker:
                         self.melody_key.steps[chord.root_note] not in forbidden
                         and chord.chord_type == SUS2_CHORD
                     ):
-                        score += 1
+                        score += 10
 
                     # appropriate root_note rewards for sus4 chord
                     forbidden = {2, 6} if self.melody_key.name.endswith("m") else {4, 7}
@@ -270,7 +278,7 @@ class AccompanimentFitnessChecker:
                         self.melody_key.steps[chord.root_note] not in forbidden
                         and chord.chord_type == SUS4_CHORD
                     ):
-                        score += 1
+                        score += 10
 
                     # check chord progression (self.melody_key.steps[chord.root_note] is guaranteed to be not None here because root_note in melody_key.notes)
                     if prev_key_step_index is not None and (
@@ -287,7 +295,15 @@ class AccompanimentFitnessChecker:
 
                 # reward for more accompaniment chords are in the same octave
                 score += (
-                    (20 if prev_octave == chord.octave else 0)
+                    (
+                        (
+                            20 - 2 * abs(prev_octave - chord.octave)
+                            if abs(prev_octave - chord.octave) < 2
+                            else 0
+                        )
+                        if self.octaves[i] is None
+                        else (20 if prev_octave == chord.octave else 0)
+                    )
                     if prev_octave is not None
                     else 0
                 )
@@ -295,16 +311,19 @@ class AccompanimentFitnessChecker:
 
                 # reward for chord hitting the major note of the melody on it's section
                 if self.key_notes[i] in chord.notes:
-                    score += 5
+                    score += 10
                     if self.key_notes[i] == chord.root_note:
-                        score += 5
+                        score += 10
 
                 # reward for more consonant sounds of chord with the melody
                 score += 3 * len(self.section_notes[i] & chord.notes)
 
                 # target octave
                 if self.octaves[i] is not None and chord.octave == self.octaves[i] - 1:
-                    score += 15
+                    score += 22
+
+                # keep the average octave of the accomponent
+                score += max(0, 6 - 2 * abs(average_octave - chord.octave))
 
         return score
 
@@ -482,6 +501,22 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        "--ps",
+        type=float,
+        help="pause sensitivity, default to 50",
+        default=50,
+        metavar="float",
+    )
+
+    parser.add_argument(
+        "--cd",
+        type=float,
+        help="chord duration, default to 1",
+        default=1,
+        metavar="float",
+    )
+
+    parser.add_argument(
         "-k",
         help="add detected key to the output file name (like filename-C#m.mid)",
         action="store_true",
@@ -497,14 +532,16 @@ if __name__ == "__main__":
     )
 
     # define chord duration and divide track into equal parts of chord durations
-    chord_duration = args.input.ticks_per_beat
+    chord_duration = int(args.input.ticks_per_beat * args.cd)
     key_notes, section_notes = compute_key_notes(
         list(filter_notes(args.input)), chord_duration
     )
 
     # prepare things for evolution
     key = detect_key(melody_notes)
-    fitness_checker = AccompanimentFitnessChecker(key, key_notes, section_notes)
+    fitness_checker = AccompanimentFitnessChecker(
+        key, key_notes, section_notes, args.ps
+    )
     population = generate_random_population(100, len(key_notes))
 
     # prepare to write the best fit (and be able to write it even in the middle of the process when user presses ctrl+c)
