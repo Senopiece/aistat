@@ -59,7 +59,7 @@ class Key:
         return self.name
 
 
-def list_diff(list1: list, list2: list) -> int:
+def list_diff(list1: list[int], list2: list[int]) -> int:
     diff = 0
     for elem1, elem2 in zip(list1, list2):
         diff += abs(elem1 - elem2)
@@ -163,6 +163,7 @@ class Chord:
 
 ## Genetic stuff
 # instances are tuple[Union[Chord, None]], where None means no chord occupying the section
+Accompaniment = tuple[Union[Chord, None]]
 
 
 def random_chord() -> Union[Chord, None]:
@@ -216,7 +217,7 @@ class AccompanimentFitnessChecker:
         self.octaves = tuple(detect_octave(notes) for notes in section_notes)
         self.pause_sensitivity = pause_sensitivity
 
-    def fitness(self, accompaniment: tuple[Union[Chord, None]]) -> float:
+    def fitness(self, accompaniment: Accompaniment) -> float:
         assert len(accompaniment) == len(self.key_notes)
 
         # GOOD_ACCESSORS[key.step_index(chord_root_note)] = set of good key indices for the next chords
@@ -332,7 +333,7 @@ class AccompanimentFitnessChecker:
 def generate_random_population(
     population_size: int,
     instance_len: int,
-) -> set[tuple[Union[Chord, None]]]:
+) -> set[Accompaniment]:
     """Returns a random population of accompaniments
 
     Args:
@@ -340,7 +341,7 @@ def generate_random_population(
         instance_len (int): length of each instance of the population (number of chords in a accompaniment)
 
     Returns:
-        set[tuple[Union[Chord, None]]]: the resulting set
+        set[Accompaniment]: the resulting set
     """
     res = set()
     for _ in range(population_size):
@@ -351,29 +352,29 @@ def generate_random_population(
 
 
 def select(
-    population: set[tuple[Union[Chord, None]]],
-    fitness: Callable[[tuple[Union[Chord, None]]], int],
-) -> set[tuple[Union[Chord, None]]]:
+    population: set[Accompaniment],
+    fitness: Callable[[Accompaniment], int],
+) -> set[Accompaniment]:
     """Selects 50% of the best instances from the population according to the fitness function
 
     Args:
-        population (set[tuple[Union[Chord, None]]]): parent population
-        fitness (Callable[[tuple[Union[Chord, None]]], int]): fitness function ( higher is better )
+        population (set[Accompaniment]): parent population
+        fitness (Callable[[Accompaniment], int]): fitness function ( higher is better )
 
     Returns:
-        set[tuple[Union[Chord, None]]]: the set of selected instances
+        set[Accompaniment]: the set of selected instances
     """
     return set(sorted(population, key=fitness, reverse=True)[: len(population) // 2])
 
 
-def cross(parents: tuple[tuple[Union[Chord, None]]]) -> tuple[Union[Chord, None]]:
+def cross(parents: tuple[Accompaniment]) -> Accompaniment:
     """Create a new instance crossing parents
 
     Args:
-        parents (set[tuple[Union[Chord, None]]]): the parents
+        parents (set[Accompaniment]): the parents
 
     Returns:
-        tuple[Union[Chord, None]]: crossed instance
+        Accompaniment: crossed instance
     """
     assert len(parents) > 1
     instance_len = len(parents[0])
@@ -382,15 +383,15 @@ def cross(parents: tuple[tuple[Union[Chord, None]]]) -> tuple[Union[Chord, None]
 
 
 def mutate(
-    instance: tuple[Union[Chord, None]],
-) -> tuple[Union[Chord, None]]:
+    instance: Accompaniment,
+) -> Accompaniment:
     """Returns similar instance, but 10% of it's chords are modified
 
     Args:
-        instance (tuple[Union[Chord, None]]): source instance
+        instance (Accompaniment): source instance
 
     Returns:
-        tuple[Union[Chord, None]]: mutated instance
+        Accompaniment: mutated instance
     """
     return tuple(
         random_chord() if random.randint(0, 10) == 0 else chord for chord in instance
