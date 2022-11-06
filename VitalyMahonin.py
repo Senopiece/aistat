@@ -16,7 +16,8 @@ try:
         return tqdm(arg, **kwargs)
 
 except ImportError:
-    print("WARNING: no tqdm module found, no progress bar can be showed")
+    print("WARNING: no tqdm module found, no progress bar can be shown")
+    print("         (run python3 -m pip install tqdm to solve this issue)")
 
     def progress(arg, **kwargs):
         return arg
