@@ -293,7 +293,7 @@ class AccompanimentFitnessChecker:
                 prev_key_step_index = self.melody_key.steps[chord.root_note]
 
                 # reward for key match
-                score += 4 * len(self.melody_key.notes & chord.notes)
+                score += 6 * len(self.melody_key.notes & chord.notes)
 
                 # reward for more accompaniment chords are in the same octave
                 score += (
