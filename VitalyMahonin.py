@@ -59,55 +59,101 @@ class Key:
         return self.name
 
 
-def list_diff(list1: list[int], list2: list[int]) -> int:
-    diff = 0
-    for elem1, elem2 in zip(list1, list2):
-        diff += abs(elem1 - elem2)
-    return diff
-
-
-def detect_key(notes: Iterator[int]) -> Key:
-    """Detects one of 24 keys,
-    but loses the octave information
+def durations(track: tuple[mido.Message]) -> tuple[float]:
+    """Calculates the durations of the notes in the track
 
     Args:
-        notes (Iterator[int]): List of used notes (midi numbers)
+        track (tuple[mido.Message]): the track to calculate the durations for
+
+    Returns:
+        tuple[float]: list of durations of the notes in the track
+    """
+    opened = [None] * 12
+    res = [0] * 12
+    time = 0
+    for msg in track:
+        time += msg.time
+        if msg.type not in ("note_on", "note_off"):
+            continue
+        note = msg.note % 12
+        if msg.type == "note_on":
+            opened[note] = time
+        elif msg.type == "note_off":
+            res[note] += time - opened[note]
+            opened[note] = None
+    return tuple(res)
+
+
+def correlation(a: tuple[float], b: tuple[float]) -> float:
+    assert len(a) == len(b)
+
+    median_a = sum(a) / len(a)
+    median_b = sum(b) / len(b)
+
+    c = sum((x - median_a) * (y - median_b) for x, y in zip(a, b))
+    d = math.sqrt(sum((x - median_a) ** 2 for x in a))
+    e = math.sqrt(sum((y - median_b) ** 2 for y in b))
+
+    return c / (d * e)
+
+
+def cycle_offset(l: tuple, offset: int) -> tuple:
+    """Returns a copy of the list with offset elements shifted to the beginning
+
+    Args:
+        l (tuple): source list
+        offset (int): offset
+
+    Returns:
+        tuple: shifted list
+
+    Examples:
+        >>> cycle_offset((1, 2, 3, 4, 5), 2) = (3, 4, 5, 1, 2)
+    """
+    return l[offset % len(l) :] + l[: offset % len(l)]
+
+
+def detect_key(note_durations: tuple[float]) -> Key:
+    """Detects one of 24 keys.
+
+    Args:
+        note_durations (tuple[float]): list of durations of the notes in the track
 
     Returns:
         Key: the most appropriate key
     """
-    _notes_names = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
-    _scales = (
+    # Krumhansl-Schmuckler key-finding algorithm:
+    # https://rnhart.net/articles/key-finding/
+    # with Simple profile from http://extras.humdrum.org/man/keycor/
+    assert len(note_durations) == 12
+    NOTENAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
+    SCALENAMES = ("", "m")
+    SCALES = (
         (0, 2, 4, 5, 7, 9, 11),  # major
         (0, 2, 3, 5, 7, 8, 10),  # minor
     )
-    _offsets_names = ("", "m")
+    PROFILES = (
+        (2, 0, 1, 0, 1, 1, 0, 2, 0, 1, 0, 1),  # major
+        (2, 0, 1, 1, 0, 1, 0, 2, 1, 0, 0.5, 0.5),  # minor
+    )
 
-    freq = [0] * 12  # freq[note] = number of occurrences of note
-    for note in notes:
-        freq[note % 12] += 1
-
-    # select 7 most frequent notes
-    most_freq = sorted(range(12), key=lambda x: freq[x], reverse=True)[:7]
-    most_freq.sort()
-
-    # determine scale by choosing the most appropriate match
-    original_offset = [e - most_freq[0] for e in most_freq]
-    scale_index = 0
-    score = 10000  # minimizing the score
-    for i, offset in enumerate(_scales):
-        new_score = list_diff(original_offset, offset)
-        if new_score < score:
-            scale_index = i
-            score = new_score
-
-    # determine tonic
-    tonic = most_freq[0]
+    best_score = -2
+    best_scale = None
+    best_tonic = None
+    for scale in range(2):
+        scale_profile = PROFILES[scale]
+        for tonic in range(12):
+            key_profile = cycle_offset(scale_profile, -tonic)
+            score = correlation(key_profile, note_durations)
+            if score > best_score:
+                best_scale = scale
+                best_tonic = tonic
+                best_score = score
 
     return Key(
-        f"{_notes_names[tonic]}{_offsets_names[scale_index]}",
-        tonic,
-        _scales[scale_index],
+        f"{NOTENAMES[best_tonic]}{SCALENAMES[best_scale]}",
+        best_tonic,
+        SCALES[best_scale],
     )
 
 
@@ -527,20 +573,16 @@ if __name__ == "__main__":
     args = parser.parse_args()
     assert args.input.type != 2
 
-    melody_notes = tuple(
-        msg.note
-        for msg in args.input
-        if isinstance(msg, mido.Message) and msg.type == "note_on"
-    )
+    melody_track = tuple(filter_notes(args.input))
 
     # define chord duration and divide track into equal parts of chord durations
     chord_duration = int(args.input.ticks_per_beat * args.cd)
-    key_notes, section_notes = compute_key_notes(
-        list(filter_notes(args.input)), chord_duration
-    )
+    key_notes, section_notes = compute_key_notes(melody_track, chord_duration)
 
     # prepare things for evolution
-    key = detect_key(melody_notes)
+    key = detect_key(durations(melody_track))
+    print("Detected key:", key)
+
     fitness_checker = AccompanimentFitnessChecker(
         key, key_notes, section_notes, args.ps
     )

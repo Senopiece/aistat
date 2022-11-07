@@ -71,8 +71,25 @@ This parameter regulates the "width" of chords in the accompaniment:
 ### --iters
 
 The bigger iterations you set, the more time program needs to complete, however, it is also more likely for it to generate better results.
+(Iterations are actually number of generations)
 
 Recommended to calculate the good iterations number using this formula:
 `1000*(melody_length + 10*gap_length)/(32*chord_duration)`.
 
 However, each melody is individual, so you may need a few more iterations to make it sound good, but sometimes a few less iterations will not affect the quality of the generated sound.
+
+Also you can stop program at any point by hitting ctrl+c, it will save the current result and terminate instantly.
+
+
+# key detection
+
+## idea
+
+Key is detected using [Krumhansl-Schmuckler algorithm](https://rnhart.net/articles/key-finding/) with simple profile coefficients from http://extras.humdrum.org/man/keycor/.
+
+Briefly, the idea of the algorithm is to iterate all 24 possible keys and calculate it's correlation with the melody. Then, choose the best fit.
+
+## detected keys
+- input1.mid : Dm
+- input2.mid : F
+- input3.mid : Em
