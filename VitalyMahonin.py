@@ -518,7 +518,10 @@ def get_average_velocity(file: mido.MidiFile):
 
 def midi_file(string):
     try:
-        return mido.MidiFile(string)
+        res = mido.MidiFile(string)
+        if res.type == 2:
+            raise ValueError("type 2 is unsupported")
+        return res
     except Exception as exc:
         raise argparse.ArgumentTypeError("Invalid MIDI file") from exc
 
@@ -574,7 +577,6 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-    assert args.input.type != 2
 
     melody_track = tuple(filter_notes(args.input))
 
