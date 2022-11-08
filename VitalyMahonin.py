@@ -9,6 +9,9 @@ import sys
 from typing import Callable, Iterator, Union
 import mido
 
+# TODO: посмотреть как он генерит baby girl
+# experemental TODO: подобрать коэффы для фитнесс функции с тоже помощью эволюции, где фитнесс функция - это похожесть сгенеренной мелодии на эталон
+
 try:
     from tqdm import tqdm
 
