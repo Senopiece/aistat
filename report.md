@@ -76,7 +76,7 @@ The melody is divided into equal pieces specified by `chord duration (--cd)`, ea
 
 So a accompaniment is represented as a list of chords (list length is equal to the number of pieces).
 
-To find a optimal list of chords the evolutionary algorithm is applied:
+To find a optimal list of chords the genetic algorithm is applied:
 
 ```python
 melody_key = detect_key(melody)
