@@ -29,38 +29,28 @@ options:
 
 ## tweaks
 
-In most cases it's enough to use the default configuration:
+The default configuration output:
 ```
 ./VitalyMahonin.py input3.mid
 ```
 ![](image1.png)
 
-```
-./VitalyMahonin.py input2.mid
-```
-![](image2.png)
 
 ### --ps
 
 
-However, you may need it to fill the gaps:
+This parameter regulates the algorithm preference to use pauses:
 ```
 ./VitalyMahonin.py input3.mid --iters 10000 --ps 0
 ```
 
 ![](image5.png)
 
-(Note that in most cases you also need to increase `--iters` because a proper gap fill can take a lot of resources)
-
-Or otherwise, you need for it to play only in tact with the melody:
-```
-./VitalyMahonin.py input2.mid --ps 1000
-```
-![](image3.png)
+(Note that in most cases you also need to increase `--iters` because a proper gap fill can take a lot of resources, especially when melody has alternating octave)
 
 ### --cd
 
-This parameter regulates the "width" of chords in the accompaniment:
+This parameter regulates the "width" of generated chords:
 ```
 ./VitalyMahonin.py input2.mid --cd 2
 ```
@@ -80,8 +70,46 @@ However, each melody is individual, so you may need a few more iterations to mak
 
 Also you can stop program at any point by hitting ctrl+c, it will save the current result and terminate instantly.
 
+# Algorithm flow
 
-# key detection
+The melody is divided into equal pieces specified by `chord duration (--cd)`, each piece will contain one chord of accompaniment.
+
+So a accompaniment is represented as a list of chords (list length is equal to the number of pieces).
+
+To find a optimal list of chords the evolutionary algorithm is applied:
+
+```python
+melody_key = detect_key(melody)
+fitness_function = create_fitness_function_from(melody, melody_key)
+population = generate_100_random_instances()
+for _ in range(generations_number):
+  selected = select_best_50_instances_from(population, fitness_function)
+  children = [mutate(cross(parents)) where parents = random.choice_two(selected) for _ in range(50)]
+  population = selected + children
+return the best instance of the latest population according to the fitness function
+```
+
+#### Closer description:
+> **Select:**
+> select the best 50 instances according to the fitness function
+
+> **Cross:**
+> the child's i-th chord is created by choosing i-th chord from a random parent.
+
+> **Mutate:**
+> for each chord it's 10% chance to be randomly modified.
+
+> **Fitness function evaluation criterions:**
+> +10 for each self-consonant chord
+> +(3-29) for each chord that is consistent with the melody
+> +(6-18) for each chord that matches the key
+> +(18-20) for each chord that matches the octave of the previous chord
+> +(2-6) for each chord that matches the average accompaniment octave
+> +22 for each chord that matches melody octave
+> +2 for each chord in correct chord progression
+> +ps for each pause with the melody
+
+# Key detection
 
 ## idea
 
