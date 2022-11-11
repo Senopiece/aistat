@@ -160,7 +160,7 @@ class AFCFitnessChecker:
             # inner evolution
             population = generate_random_population(100, len(solution.config.key_notes))
             population = set(Fitted(e, fitness_checker.fitness(e)) for e in population)
-            for _ in range(100):
+            for _ in range(1000):
                 selected = select(population, lambda x: x.fitness)
                 population = copy(selected)
                 while len(population) < random.randint(90, 100):
@@ -237,7 +237,13 @@ if __name__ == "__main__":
 
     # evolute
     population = generate_random_population_fc(100)
-    population = set(Fitted(e, checker.fitness(e)) for e in population)
+    tmp = set()
+    for e in progress(
+        population,
+        desc="Initializing",
+    ):
+        tmp.add(Fitted(e, checker.fitness(e)))
+    population = tmp
 
     def write():
         best = sorted(population, key=lambda x: x.fitness, reverse=True)[0].instance
@@ -252,7 +258,7 @@ if __name__ == "__main__":
 
     try:
         for _ in progress(
-            range(100),
+            range(1000),
             desc="Progress",
         ):
             selected = select_fc(population, lambda x: x.fitness)
