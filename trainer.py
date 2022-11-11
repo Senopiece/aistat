@@ -27,6 +27,10 @@ from VitalyMahonin import (
     Fitted,
 )
 
+# TODO: logging
+# TODO: log errors
+# TODO: numba
+
 # Genetic stiff
 FitnessCoefficients = tuple[float]
 
@@ -202,6 +206,12 @@ if __name__ == "__main__":
         help="parallelization",
     )
 
+    parser.add_argument(
+        "-s",
+        help="intialize from selected.json",
+        action="store_true",
+    )
+
     args = parser.parse_args()
 
     etalon_solutions = []
@@ -240,50 +250,70 @@ if __name__ == "__main__":
 
     checker = AFCFitnessChecker(etalon_solutions)
 
-    # evolute
-    population = generate_random_population_fc(100)
+    def load_selected():
+        seledka = None
+        with open("selected.json", "r") as f:
+            seledka = json.load(f)
+        return set(map(lambda x: Fitted(tuple(x[0]), x[1]), seledka))
+    
+    def individ(selected):
+        parents = tuple(
+            random.choice(tuple(selected)).instance for _ in range(2)
+        )
+        individual = mutate_fc(cross_fc(parents))
+        return individual
 
     with Pool(args.p) as pool:
-        tmp = set()
+        population = None
 
-        for e, fitness in progress(
-            pool.imap_unordered(f, map(lambda x: (x, checker.fitness), population)),
-            total=len(population),
-            desc="Initializing",
-        ):
-            tmp.add(Fitted(e, fitness))
-        population = tmp
+        if args.s:
+            selected = load_selected()
+            population = copy(selected)
+            tglen = random.randint(90, 100) - len(population)
+            for e, fitness in progress(
+                pool.imap_unordered(
+                    f,
+                    map(
+                        lambda _: (individ(selected), checker.fitness),
+                        range(tglen),
+                    ),
+                ),
+                total=tglen,
+                desc="Initializing from selected.json",
+            ):
+                population.add(Fitted(e, fitness))
+        else:
+            population = generate_random_population_fc(100)
+            tmp = set()
+            for e, fitness in progress(
+                pool.imap_unordered(f, map(lambda x: (x, checker.fitness), population)),
+                total=len(population),
+                desc="Initializing",
+            ):
+                tmp.add(Fitted(e, fitness))
+            population = tmp
 
-    def dump_selected():  # emergency dump
-        with open("selected.json", "w") as f:
-            selected = select_fc(population, lambda x: x.fitness)
-            json.dump(list([e.instance, e.fitness] for e in selected), f)
+        def dump_selected():  # emergency dump
+            with open("selected.json", "w") as f:
+                selected = select_fc(population, lambda x: x.fitness)
+                json.dump(list([e.instance, e.fitness] for e in selected), f)
 
-    def write():
-        best = sorted(population, key=lambda x: x.fitness, reverse=True)[0].instance
-        print(best)
-        dump_selected()
+        def write():
+            best = sorted(population, key=lambda x: x.fitness, reverse=True)[0].instance
+            print(best)
+            dump_selected()
 
-    with Pool(args.p) as pool:
         for _ in progress(
             range(100),
             desc="Progress",
         ):
             selected = select_fc(population, lambda x: x.fitness)
             dump_selected()
-
-            def individ():
-                parents = tuple(
-                    random.choice(tuple(selected)).instance for _ in range(2)
-                )
-                individual = mutate_fc(cross_fc(parents))
-                return individual
-
             population = copy(selected)
             for e, fitness in pool.imap_unordered(
                 f,
                 map(
-                    lambda _: (individ(), checker.fitness),
+                    lambda _: (individ(selected), checker.fitness),
                     range(random.randint(90, 100) - len(population)),
                 ),
             ):
