@@ -448,17 +448,17 @@ def generate_random_population(
 
 
 def select(
-    population: set[Accompaniment],
-    fitness: Callable[[Accompaniment], float],
-) -> set[Accompaniment]:
+    population: set[Fitted],
+    fitness: Callable[[Fitted], float],
+) -> set[Fitted]:
     """Selects 50% of the best instances from the population according to the fitness function
 
     Args:
-        population (set[Accompaniment]): parent population
-        fitness (Callable[[Accompaniment], float]): fitness function ( higher is better )
+        population (set[Fitted]): parent population
+        fitness (Callable[[Fitted], float]): fitness function ( higher is better )
 
     Returns:
-        set[Accompaniment]: the set of selected instances
+        set[Fitted]: the set of selected instances
     """
     return set(sorted(population, key=fitness, reverse=True)[: len(population) // 2])
 

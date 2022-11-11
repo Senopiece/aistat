@@ -1,13 +1,15 @@
 #!/bin/python3
+from multiprocessing import Pool
 from functools import lru_cache
-import sys
 import random
-import signal
+import json
 from typing import Callable, Any
 import mido
 import math
 from dataclasses import dataclass
+import argparse
 from copy import copy
+from tqdm import tqdm
 from VitalyMahonin import (
     AccompanimentFitnessChecker,
     Accompaniment,
@@ -22,9 +24,8 @@ from VitalyMahonin import (
     filter_notes,
     detect_key,
     durations,
+    Fitted,
 )
-
-# TODO: parallelization
 
 # Genetic stiff
 FitnessCoefficients = tuple[float]
@@ -34,15 +35,15 @@ def generate_random_population_fc(
     population_size: int,
 ) -> set[FitnessCoefficients]:
     return set(
-        tuple(random.uniform(0.0, 60.0) for _ in range(16))
+        tuple(random.uniform(0.0, 100.0) for _ in range(16))
         for _ in range(population_size)
     )
 
 
 def select_fc(
-    population: set[FitnessCoefficients],
-    fitness: Callable[[FitnessCoefficients], float],
-) -> set[FitnessCoefficients]:
+    population: set[Fitted],
+    fitness: Callable[[Fitted], float],
+) -> set[Fitted]:
     return set(sorted(population, key=fitness, reverse=True)[: len(population) // 2])
 
 
@@ -57,7 +58,8 @@ def mutate_fc(
     instance: FitnessCoefficients,
 ) -> FitnessCoefficients:
     return tuple(
-        random.uniform(0.0, 60.0) if random.randint(0, 10) == 0 else e for e in instance
+        random.uniform(0.0, 100.0) if random.randint(0, 10) == 0 else e
+        for e in instance
     )
 
 
@@ -183,22 +185,25 @@ class AFCFitnessChecker:
         return score
 
 
-@dataclass
-class Fitted:
-    instance: Any
-    fitness: float
-
-    def __init__(self, instance: Any, fitness: float):
-        self.instance = instance
-        self.fitness = fitness
-
-    def __hash__(self) -> int:
-        return hash((self.instance, self.fitness))
+def f(x):
+    e = x[0]
+    fit = x[1]
+    return (e, fit(e))
 
 
 # Main
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "p",
+        type=int,
+        help="parallelization",
+    )
+
+    args = parser.parse_args()
+
     etalon_solutions = []
 
     for src, res in (
@@ -237,39 +242,50 @@ if __name__ == "__main__":
 
     # evolute
     population = generate_random_population_fc(100)
-    tmp = set()
-    for e in progress(
-        population,
-        desc="Initializing",
-    ):
-        tmp.add(Fitted(e, checker.fitness(e)))
-    population = tmp
+
+    with Pool(args.p) as pool:
+        tmp = set()
+
+        for e, fitness in progress(
+            pool.imap_unordered(f, map(lambda x: (x, checker.fitness), population)),
+            total=len(population),
+            desc="Initializing",
+        ):
+            tmp.add(Fitted(e, fitness))
+        population = tmp
+
+    def dump_selected():  # emergency dump
+        with open("selected.json", "w") as f:
+            selected = select_fc(population, lambda x: x.fitness)
+            json.dump(list([e.instance, e.fitness] for e in selected), f)
 
     def write():
         best = sorted(population, key=lambda x: x.fitness, reverse=True)[0].instance
         print(best)
+        dump_selected()
 
-    def sigint_handler(*_):
-        # write so far best found solution even not all iterations are done
-        write()
-        sys.exit(0)
-
-    signal.signal(signal.SIGINT, sigint_handler)  # handle ctrl+c
-
-    try:
+    with Pool(args.p) as pool:
         for _ in progress(
-            range(1000),
+            range(100),
             desc="Progress",
         ):
             selected = select_fc(population, lambda x: x.fitness)
-            population = copy(selected)
-            while len(population) < random.randint(90, 100):
+            dump_selected()
+
+            def individ():
                 parents = tuple(
                     random.choice(tuple(selected)).instance for _ in range(2)
                 )
                 individual = mutate_fc(cross_fc(parents))
-                population.add(Fitted(individual, checker.fitness(individual)))
-    except Exception as e:
-        write()
-        raise e
+                return individual
+
+            population = copy(selected)
+            for e, fitness in pool.imap_unordered(
+                f,
+                map(
+                    lambda _: (individ(), checker.fitness),
+                    range(random.randint(90, 100) - len(population)),
+                ),
+            ):
+                population.add(Fitted(e, fitness))
     write()
