@@ -1,4 +1,5 @@
 #!/bin/python3
+from functools import lru_cache
 from copy import copy
 from dataclasses import dataclass
 import math
@@ -6,7 +7,7 @@ import random
 import argparse
 import signal
 import sys
-from typing import Callable, Iterator, Union
+from typing import Callable, Iterator, Union, Any
 import mido
 
 
@@ -25,6 +26,19 @@ except ImportError:
 
 
 ## Helpers
+
+
+@dataclass
+class Fitted:
+    instance: Any
+    fitness: float
+
+    def __init__(self, instance: Any, fitness: float):
+        self.instance = instance
+        self.fitness = fitness
+
+    def __hash__(self) -> int:
+        return hash((self.instance, self.fitness))
 
 
 @dataclass
@@ -58,6 +72,9 @@ class Key:
 
     def __str__(self) -> str:
         return self.name
+
+    def __hash__(self) -> int:
+        return hash((self.name, self.tonic, self.notes, self.steps))
 
 
 def durations(track: tuple[mido.Message]) -> tuple[float]:
@@ -239,6 +256,7 @@ class AccompanimentFitnessChecker:
     section_notes: tuple[set[int]]
     octaves: tuple[Union[int, None]]
     pause_sensitivity: float
+    coefficients: tuple[float]
 
     def __init__(
         self,
@@ -246,6 +264,24 @@ class AccompanimentFitnessChecker:
         key_notes: tuple[int],
         section_notes: tuple[set[int]],
         pause_sensitivity: float,
+        coefficients: tuple[float] = (
+            1,
+            10,
+            10,
+            10,
+            10,
+            2,
+            6,
+            20,
+            2,
+            20,
+            10,
+            10,
+            3,
+            22,
+            6,
+            2,
+        ),
     ):
         """Creates the accompaniment fitness checker for a concrete melody
 
@@ -254,7 +290,9 @@ class AccompanimentFitnessChecker:
             key_notes (tuple[int]): notes by each section (midi, lost octave) that need to be consonant with the accompaniment
             section_notes (tuple[set[int]]): all the notes in the section (midi number, octave present)
             pause_sensitivity (float): pause sensitivity
+            coefficients (tuple[float]): list of coefficients for the fitness function
         """
+        assert len(coefficients) == 16
         assert all(note is None or 0 <= note < 12 for note in key_notes)
         self.melody_key = melody_key
         self.key_notes = key_notes
@@ -263,7 +301,9 @@ class AccompanimentFitnessChecker:
         )
         self.octaves = tuple(detect_octave(notes) for notes in section_notes)
         self.pause_sensitivity = pause_sensitivity
+        self.coefficients = coefficients
 
+    @lru_cache(maxsize=120)
     def fitness(self, accompaniment: Accompaniment) -> float:
         assert len(accompaniment) == len(self.key_notes)
 
@@ -295,7 +335,7 @@ class AccompanimentFitnessChecker:
                 average_octave = octave_s / (i + 1)
 
                 if chord.root_note in self.melody_key.notes:
-                    score += 1
+                    score += self.coefficients[0]
 
                     # appropriate root_note rewards for major, minor and dim chords
                     forbidden = {2} if self.melody_key.name.endswith("m") else {7}
@@ -305,13 +345,13 @@ class AccompanimentFitnessChecker:
                         MAJOR_CHORD,
                         MINOR_CHORD,
                     }:
-                        score += 10
+                        score += self.coefficients[1]
                     elif (
                         self.melody_key.steps[chord.root_note]
                         in forbidden  # witch was forbidden for major and minor is good for dim
                         and chord.chord_type == DIM_CHORD
                     ):
-                        score += 10
+                        score += self.coefficients[2]
 
                     # appropriate root_note rewards for sus2 chord
                     forbidden = {2, 5} if self.melody_key.name.endswith("m") else {3, 7}
@@ -319,7 +359,7 @@ class AccompanimentFitnessChecker:
                         self.melody_key.steps[chord.root_note] not in forbidden
                         and chord.chord_type == SUS2_CHORD
                     ):
-                        score += 10
+                        score += self.coefficients[3]
 
                     # appropriate root_note rewards for sus4 chord
                     forbidden = {2, 6} if self.melody_key.name.endswith("m") else {4, 7}
@@ -327,31 +367,34 @@ class AccompanimentFitnessChecker:
                         self.melody_key.steps[chord.root_note] not in forbidden
                         and chord.chord_type == SUS4_CHORD
                     ):
-                        score += 10
+                        score += self.coefficients[4]
 
                     # check chord progression (self.melody_key.steps[chord.root_note] is guaranteed to be not None here because root_note in melody_key.notes)
                     if prev_key_step_index is not None and (
                         self.melody_key.steps[chord.root_note]
                         in GOOD_ACCESSORS[prev_key_step_index]
                     ):
-                        score += 2
+                        score += self.coefficients[5]
 
                 # note that for a chord that does not match the key with it's root self.melody_key.steps[chord.root_note] would return None
                 prev_key_step_index = self.melody_key.steps[chord.root_note]
 
                 # reward for key match
-                score += 6 * len(self.melody_key.notes & chord.notes)
+                score += self.coefficients[6] * len(self.melody_key.notes & chord.notes)
 
                 # reward for more accompaniment chords are in the same octave
                 score += (
                     (
                         (
-                            20 - 2 * abs(prev_octave - chord.octave)
+                            self.coefficients[7]
+                            - self.coefficients[8] * abs(prev_octave - chord.octave)
                             if abs(prev_octave - chord.octave) < 2
                             else 0
                         )
                         if self.octaves[i] is None
-                        else (20 if prev_octave == chord.octave else 0)
+                        else (
+                            self.coefficients[9] if prev_octave == chord.octave else 0
+                        )
                     )
                     if prev_octave is not None
                     else 0
@@ -360,19 +403,25 @@ class AccompanimentFitnessChecker:
 
                 # reward for chord hitting the major note of the melody on it's section
                 if self.key_notes[i] in chord.notes:
-                    score += 10
+                    score += self.coefficients[10]
                     if self.key_notes[i] == chord.root_note:
-                        score += 10
+                        score += self.coefficients[11]
 
                 # reward for more consonant sounds of chord with the melody
-                score += 3 * len(self.section_notes[i] & chord.notes)
+                score += self.coefficients[12] * len(
+                    self.section_notes[i] & chord.notes
+                )
 
                 # target octave
                 if self.octaves[i] is not None and chord.octave == self.octaves[i] - 1:
-                    score += 22
+                    score += self.coefficients[13]
 
                 # keep the average octave of the accomponent
-                score += max(0, 6 - 2 * abs(average_octave - chord.octave))
+                score += max(
+                    0,
+                    self.coefficients[14]
+                    - self.coefficients[15] * abs(average_octave - chord.octave),
+                )
 
         return score
 
@@ -400,13 +449,13 @@ def generate_random_population(
 
 def select(
     population: set[Accompaniment],
-    fitness: Callable[[Accompaniment], int],
+    fitness: Callable[[Accompaniment], float],
 ) -> set[Accompaniment]:
     """Selects 50% of the best instances from the population according to the fitness function
 
     Args:
         population (set[Accompaniment]): parent population
-        fitness (Callable[[Accompaniment], int]): fitness function ( higher is better )
+        fitness (Callable[[Accompaniment], float]): fitness function ( higher is better )
 
     Returns:
         set[Accompaniment]: the set of selected instances
@@ -465,7 +514,7 @@ def track_longing(track: list[mido.Message]) -> int:
 
 def compute_key_notes(
     track: list[mido.Message], chord_duration: int
-) -> list[tuple[int], tuple[set[int]]]:
+) -> list[tuple[int], tuple[frozenset[int]]]:
     """Divides the track into equal parts (call sections) by chord duration,
     and counts key and regular notes for each section
 
@@ -474,19 +523,23 @@ def compute_key_notes(
         chord_duration (int): duration of a chord in ticks
 
     Returns:
-        list[tuple[int], tuple[int]]:
+        list[tuple[int], tuple[frozenset[int]]]:
             [0] a tuple of key notes (midi number, lost octave)
             [1] a tuple of all notes in the section (midi number, octave present)
     """
     key_notes_list = [None] * (math.ceil(track_longing(track) / chord_duration))
-    all_notes_list = [set() for _ in range(len(key_notes_list))]
+    all_notes_list = [[] for _ in range(len(key_notes_list))]
     ticks = 0
     for msg in track:
         ticks += msg.time
         if msg.type == "note_on":
             if ticks % chord_duration == 0:
                 key_notes_list[ticks // chord_duration] = msg.note % 12
-            all_notes_list[ticks // chord_duration].add(msg.note)
+            all_notes_list[ticks // chord_duration].append(msg.note)
+
+    for i, e in enumerate(all_notes_list):
+        all_notes_list[i] = frozenset(e)
+
     return tuple(key_notes_list), tuple(all_notes_list)
 
 
@@ -590,10 +643,11 @@ if __name__ == "__main__":
         key, key_notes, section_notes, args.ps
     )
     population = generate_random_population(100, len(key_notes))
+    population = set(Fitted(e, fitness_checker.fitness(e)) for e in population)
 
     # prepare to write the best fit (and be able to write it even in the middle of the process when user presses ctrl+c)
     def write():
-        best = sorted(population, key=fitness_checker.fitness, reverse=True)[0]
+        best = sorted(population, key=lambda x: x.fitness, reverse=True)[0].instance
         velocity = int(get_average_velocity(args.input) * 0.7)
 
         track = mido.MidiTrack()
@@ -639,11 +693,12 @@ if __name__ == "__main__":
         range(args.iters),
         desc="Progress",
     ):
-        selected = select(population, fitness_checker.fitness)
+        selected = select(population, lambda x: x.fitness)
         population = copy(selected)
         while len(population) < random.randint(90, 100):
-            parents = tuple(random.choice(tuple(selected)) for _ in range(2))
-            population.add(mutate(cross(parents)))
+            parents = tuple(random.choice(tuple(selected)).instance for _ in range(2))
+            individual = mutate(cross(parents))
+            population.add(Fitted(individual, fitness_checker.fitness(individual)))
 
     # write result
     write()
