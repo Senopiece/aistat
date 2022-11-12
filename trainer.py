@@ -222,6 +222,13 @@ if __name__ == "__main__":
         action="store_true",
     )
 
+    parser.add_argument(
+        "--e",
+        type=str,
+        help="path to the midi files",
+        default="./"
+    )
+
     args = parser.parse_args()
 
     etalon_solutions = []
@@ -231,10 +238,10 @@ if __name__ == "__main__":
         ("input2.mid", "acc2.mid"),
         ("input3.mid", "acc3.mid"),
     ):
-        file = mido.MidiFile(res)
+        file = mido.MidiFile(args.e + res)
         track = file.tracks[1]  # accomponiment track
 
-        sfile = mido.MidiFile(src)
+        sfile = mido.MidiFile(args.e + src)
         melody_track = tuple(filter_notes(sfile))
         chord_duration = (
             sfile.ticks_per_beat
