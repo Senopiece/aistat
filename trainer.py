@@ -9,7 +9,10 @@ import math
 from dataclasses import dataclass
 import argparse
 from copy import copy
-from tqdm import tqdm
+import logging
+import datetime
+import traceback
+import os
 from VitalyMahonin import (
     AccompanimentFitnessChecker,
     Accompaniment,
@@ -27,9 +30,14 @@ from VitalyMahonin import (
     Fitted,
 )
 
-# TODO: logging
-# TODO: log errors
-# TODO: numba
+logger = logging.getLogger('logger')
+if not os.path.exists('logs'):
+    os.mkdir('logs')
+file_handler = logging.FileHandler(f'logs/trainer-{datetime.datetime.now()}.log')
+formatter = logging.Formatter('%(asctime)s:%(levelname)s:  %(message)s', datefmt='%H:%M:%Ss')
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
+logger.setLevel(logging.INFO)
 
 # Genetic stiff
 FitnessCoefficients = tuple[float]
@@ -152,7 +160,7 @@ class AFCFitnessChecker:
         score = 0
 
         # try to fit as much solutions
-        for solution in self.solutions:
+        for si, solution in enumerate(self.solutions):
             assert all(len(e) in {3, 0} for e in solution.etalon)
 
             fitness_checker = AccompanimentFitnessChecker(
@@ -164,9 +172,10 @@ class AFCFitnessChecker:
             )
 
             # inner evolution
+            logger.info(f"{hash(instance)} evolute on melody {si+1}/{len(self.solutions)}")
             population = generate_random_population(100, len(solution.config.key_notes))
             population = set(Fitted(e, fitness_checker.fitness(e)) for e in population)
-            for _ in range(1000):
+            for i in range(1000):
                 selected = select(population, lambda x: x.fitness)
                 population = copy(selected)
                 while len(population) < random.randint(90, 100):
@@ -185,7 +194,8 @@ class AFCFitnessChecker:
 
             # the fitness function itself - compute etalon similarity
             score += sum(len(a & b) for a, b in zip(best, solution.etalon))
-
+        
+        logger.info(f"{hash(instance)}: fitness: {score}, instance: {instance}")
         return score
 
 
@@ -263,59 +273,66 @@ if __name__ == "__main__":
         individual = mutate_fc(cross_fc(parents))
         return individual
 
-    with Pool(args.p) as pool:
-        population = None
+    try:
+        with Pool(args.p) as pool:
+            population = None
 
-        if args.s:
-            selected = load_selected()
-            population = copy(selected)
-            tglen = random.randint(90, 100) - len(population)
-            for e, fitness in progress(
-                pool.imap_unordered(
+            if args.s:
+                selected = load_selected()
+                population = copy(selected)
+                tglen = random.randint(90, 100) - len(population)
+                for e, fitness in progress(
+                    pool.imap_unordered(
+                        f,
+                        map(
+                            lambda _: (individ(selected), checker.fitness),
+                            range(tglen),
+                        ),
+                    ),
+                    total=tglen,
+                    desc="Initializing from selected.json",
+                ):
+                    population.add(Fitted(e, fitness))
+            else:
+                population = generate_random_population_fc(100)
+                tmp = set()
+                for e, fitness in progress(
+                    pool.imap_unordered(f, map(lambda x: (x, checker.fitness), population)),
+                    total=len(population),
+                    desc="Initializing",
+                ):
+                    tmp.add(Fitted(e, fitness))
+                population = tmp
+
+            def dump_selected():  # emergency dump
+                with open("selected.json", "w") as f:
+                    selected = select_fc(population, lambda x: x.fitness)
+                    dumped = list([e.instance, e.fitness] for e in selected)
+                    logger.info(f"Updated selected.json: {dumped}")
+                    json.dump(dumped, f)
+
+            def write():
+                best = sorted(population, key=lambda x: x.fitness, reverse=True)[0].instance
+                print(best)
+                dump_selected()
+
+            for i in progress(
+                range(100),
+                desc="Progress",
+            ):
+                logger.info(f">>> Population {i+1}/100")
+                selected = select_fc(population, lambda x: x.fitness)
+                dump_selected()
+                population = copy(selected)
+                for e, fitness in pool.imap_unordered(
                     f,
                     map(
                         lambda _: (individ(selected), checker.fitness),
-                        range(tglen),
+                        range(random.randint(90, 100) - len(population)),
                     ),
-                ),
-                total=tglen,
-                desc="Initializing from selected.json",
-            ):
-                population.add(Fitted(e, fitness))
-        else:
-            population = generate_random_population_fc(100)
-            tmp = set()
-            for e, fitness in progress(
-                pool.imap_unordered(f, map(lambda x: (x, checker.fitness), population)),
-                total=len(population),
-                desc="Initializing",
-            ):
-                tmp.add(Fitted(e, fitness))
-            population = tmp
-
-        def dump_selected():  # emergency dump
-            with open("selected.json", "w") as f:
-                selected = select_fc(population, lambda x: x.fitness)
-                json.dump(list([e.instance, e.fitness] for e in selected), f)
-
-        def write():
-            best = sorted(population, key=lambda x: x.fitness, reverse=True)[0].instance
-            print(best)
-            dump_selected()
-
-        for _ in progress(
-            range(100),
-            desc="Progress",
-        ):
-            selected = select_fc(population, lambda x: x.fitness)
-            dump_selected()
-            population = copy(selected)
-            for e, fitness in pool.imap_unordered(
-                f,
-                map(
-                    lambda _: (individ(selected), checker.fitness),
-                    range(random.randint(90, 100) - len(population)),
-                ),
-            ):
-                population.add(Fitted(e, fitness))
-    write()
+                ):
+                    population.add(Fitted(e, fitness))
+            write()
+    except Exception as e:
+        logger.error(traceback.format_exc())
+        raise e
