@@ -225,7 +225,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--e",
         type=str,
-        help="path to the midi files",
+        help="working path",
         default="./"
     )
 
@@ -269,7 +269,7 @@ if __name__ == "__main__":
 
     def load_selected():
         seledka = None
-        with open("selected.json", "r") as f:
+        with open(args.e + "selected.json", "r") as f:
             seledka = json.load(f)
         return set(map(lambda x: Fitted(tuple(x[0]), x[1]), seledka))
     
@@ -312,7 +312,7 @@ if __name__ == "__main__":
                 population = tmp
 
             def dump_selected():  # emergency dump
-                with open("selected.json", "w") as f:
+                with open(args.e + "selected.json", "w") as f:
                     selected = select_fc(population, lambda x: x.fitness)
                     dumped = list([e.instance, e.fitness] for e in selected)
                     logger.info(f"Updated selected.json: {dumped}")
