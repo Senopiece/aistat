@@ -31,13 +31,6 @@ from VitalyMahonin import (
 )
 
 logger = logging.getLogger('logger')
-if not os.path.exists('logs'):
-    os.mkdir('logs')
-file_handler = logging.FileHandler(f'logs/trainer-{datetime.datetime.now()}.log')
-formatter = logging.Formatter('%(asctime)s:%(levelname)s:  %(message)s', datefmt='%H:%M:%Ss')
-file_handler.setFormatter(formatter)
-logger.addHandler(file_handler)
-logger.setLevel(logging.INFO)
 
 # Genetic stiff
 FitnessCoefficients = tuple[float]
@@ -231,8 +224,15 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    etalon_solutions = []
+    if not os.path.exists(args.e + 'logs'):
+        os.mkdir(args.e + 'logs')
+    file_handler = logging.FileHandler(f'{args.e}logs/trainer-{datetime.datetime.now()}.log')
+    formatter = logging.Formatter('%(asctime)s:%(levelname)s:  %(message)s', datefmt='%H:%M:%Ss')
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+    logger.setLevel(logging.INFO)
 
+    etalon_solutions = []
     for src, res in (
         ("input1.mid", "acc1.mid"),
         ("input2.mid", "acc2.mid"),
