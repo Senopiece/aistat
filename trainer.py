@@ -33,14 +33,14 @@ from VitalyMahonin import (
 logger = logging.getLogger("logger")
 
 # Genetic stiff
-FitnessCoefficients = tuple[float]
+FitnessCoefficients = tuple[int]
 
 
 def generate_random_population_fc(
     population_size: int,
 ) -> set[FitnessCoefficients]:
     return set(
-        tuple(random.uniform(0.0, 100.0) for _ in range(16))
+        tuple(random.randint(0, 100) for _ in range(16))
         for _ in range(population_size)
     )
 
@@ -63,7 +63,7 @@ def mutate_fc(
     instance: FitnessCoefficients,
 ) -> FitnessCoefficients:
     return tuple(
-        random.uniform(0.0, 100.0) if random.randint(0, 10) == 0 else e
+        random.randint(0, 100) if random.randint(0, 10) == 0 else e
         for e in instance
     )
 
@@ -267,25 +267,6 @@ if __name__ == "__main__":
     etalon_solutions = frozenset(etalon_solutions)
 
     checker = AFCFitnessChecker(etalon_solutions)
-
-    print(checker.fitness((
-            1,
-            10,
-            10,
-            10,
-            10,
-            2,
-            6,
-            20,
-            2,
-            20,
-            10,
-            10,
-            3,
-            22,
-            6,
-            2,
-        )))
 
     def load_selected():
         seledka = None
