@@ -3,7 +3,7 @@ from multiprocessing import Pool
 from functools import lru_cache
 import random
 import json
-from typing import Callable, Any
+from typing import Callable
 import mido
 import math
 from dataclasses import dataclass
@@ -30,7 +30,7 @@ from VitalyMahonin import (
     Fitted,
 )
 
-logger = logging.getLogger('logger')
+logger = logging.getLogger("logger")
 
 # Genetic stiff
 FitnessCoefficients = tuple[float]
@@ -165,7 +165,9 @@ class AFCFitnessChecker:
             )
 
             # inner evolution
-            logger.info(f"{hash(instance)} evolute on melody {si+1}/{len(self.solutions)}")
+            logger.info(
+                f"{hash(instance)} evolute on melody {si+1}/{len(self.solutions)}"
+            )
             population = generate_random_population(100, len(solution.config.key_notes))
             population = set(Fitted(e, fitness_checker.fitness(e)) for e in population)
             for i in range(1000):
@@ -187,7 +189,7 @@ class AFCFitnessChecker:
 
             # the fitness function itself - compute etalon similarity
             score += sum(len(a & b) for a, b in zip(best, solution.etalon))
-        
+
         logger.info(f"{hash(instance)}: fitness: {score}, instance: {instance}")
         return score
 
@@ -215,19 +217,18 @@ if __name__ == "__main__":
         action="store_true",
     )
 
-    parser.add_argument(
-        "--e",
-        type=str,
-        help="working path",
-        default="./"
-    )
+    parser.add_argument("--e", type=str, help="working path", default="./")
 
     args = parser.parse_args()
 
-    if not os.path.exists(args.e + 'logs'):
-        os.mkdir(args.e + 'logs')
-    file_handler = logging.FileHandler(f'{args.e}logs/trainer-{datetime.datetime.now()}.log')
-    formatter = logging.Formatter('%(asctime)s:%(levelname)s:  %(message)s', datefmt='%H:%M:%Ss')
+    if not os.path.exists(args.e + "logs"):
+        os.mkdir(args.e + "logs")
+    file_handler = logging.FileHandler(
+        f"{args.e}logs/trainer-{datetime.datetime.now()}.log"
+    )
+    formatter = logging.Formatter(
+        "%(asctime)s:%(levelname)s:  %(message)s", datefmt="%H:%M:%Ss"
+    )
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
     logger.setLevel(logging.INFO)
@@ -291,11 +292,9 @@ if __name__ == "__main__":
         with open(args.e + "selected.json", "r") as f:
             seledka = json.load(f)
         return set(map(lambda x: Fitted(tuple(x[0]), x[1]), seledka))
-    
+
     def individ(selected):
-        parents = tuple(
-            random.choice(tuple(selected)).instance for _ in range(2)
-        )
+        parents = tuple(random.choice(tuple(selected)).instance for _ in range(2))
         individual = mutate_fc(cross_fc(parents))
         return individual
 
@@ -323,7 +322,9 @@ if __name__ == "__main__":
                 population = generate_random_population_fc(100)
                 tmp = set()
                 for e, fitness in progress(
-                    pool.imap_unordered(f, map(lambda x: (x, checker.fitness), population)),
+                    pool.imap_unordered(
+                        f, map(lambda x: (x, checker.fitness), population)
+                    ),
                     total=len(population),
                     desc="Initializing",
                 ):
@@ -338,7 +339,10 @@ if __name__ == "__main__":
                     json.dump(dumped, f)
 
             def write():
-                best = sorted(population, key=lambda x: x.fitness, reverse=True)[0].instance
+                best = sorted(population, key=lambda x: x.fitness, reverse=True)[
+                    0
+                ].instance
+                logger.info(f"Best: {best}")
                 print(best)
                 dump_selected()
 
@@ -346,7 +350,7 @@ if __name__ == "__main__":
                 range(100),
                 desc="Progress",
             ):
-                logger.info(f">>> Population {i+1}/100")
+                logger.info(f">>> Generation {i+1}/100")
                 selected = select_fc(population, lambda x: x.fitness)
                 dump_selected()
                 population = copy(selected)
