@@ -70,7 +70,7 @@ def mutate_fc(
 
 def accompaniment_to_notes(accompaniment: Accompaniment) -> tuple[frozenset[int]]:
     return tuple(
-        frozenset(note + e.octave for note in e.notes) if e is not None else frozenset()
+        frozenset(note + e.octave*12 for note in e.notes) if e is not None else frozenset()
         for e in accompaniment
     )
 
@@ -266,6 +266,25 @@ if __name__ == "__main__":
     etalon_solutions = frozenset(etalon_solutions)
 
     checker = AFCFitnessChecker(etalon_solutions)
+
+    print(checker.fitness((
+            1,
+            10,
+            10,
+            10,
+            10,
+            2,
+            6,
+            20,
+            2,
+            20,
+            10,
+            10,
+            3,
+            22,
+            6,
+            2,
+        )))
 
     def load_selected():
         seledka = None
